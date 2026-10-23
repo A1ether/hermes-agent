@@ -37,7 +37,8 @@ import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { isSubmitEnter } from '@/lib/ime'
 import { catalogProviderMatches, modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
-import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
+import { displayModelName, isGatewayCatalog, modelDisplayParts } from '@/lib/model-status-label'
+import { isKnownSupplier, supplierNamer, supplierOf } from '@/lib/model-suppliers'
 import { accountResetMs, formatReset, modelResetMs } from '@/lib/provider-limit'
 import { reasoningEffortLabel } from '@/lib/reasoning-effort'
 import { foldIncludes, normalize } from '@/lib/text'
@@ -194,6 +195,9 @@ interface ModelCatalogMenuProps {
 interface ProviderGroup {
   families: ModelFamily[]
   provider: ModelOptionProvider
+  /** The catalog is a GATEWAY catalog (`isGatewayCatalog`): several vendors
+   *  behind one endpoint, so each row must name its supplier. */
+  gateway: boolean
 }
 
 function queryErrorMessage(error: unknown): null | string {
@@ -363,6 +367,14 @@ export function ModelCatalogMenu({
   // listed twice in one open menu. Not while searching: a query lists every
   // match in its provider's place.
   const favoriteSet = useMemo(() => new Set(favoriteKeys), [favoriteKeys])
+
+  // Which providers are gateways, by slug — the Favorites section mixes
+  // providers in one list, so it can't read the flag off a group.
+  const favoriteGateway = useMemo(
+    () => new Map(pickerProviders.map(provider => [provider.slug, isGatewayCatalog(provider.models ?? [], isKnownSupplier)])),
+    [pickerProviders]
+  )
+
   // Favorites that mix providers name each provider once, as a quiet label
   // over its rows (two labs can serve the same model name). With one provider
   // the label would only repeat the section.
@@ -762,6 +774,7 @@ export function ModelCatalogMenu({
                     defaultEffort={defaultEffort}
                     family={family}
                     favorite
+                    gateway={favoriteGateway.get(provider.slug)}
                     kbProps={kbRowProps(`${provider.slug}:${family.id}`)}
                     loadingModels={loadingModels}
                     onSelect={selectFamily}
@@ -811,6 +824,7 @@ export function ModelCatalogMenu({
                       defaultEffort={defaultEffort}
                       family={family}
                       favorite={favoriteSet.has(favoriteModelKey(group.provider.slug, family.id))}
+                      gateway={group.gateway}
                       kbProps={kbRowProps(`${group.provider.slug}:${family.id}`)}
                       key={`${group.provider.slug}:${family.id}`}
                       loadingModels={loadingModels}
@@ -980,6 +994,10 @@ interface ModelFamilyRowProps {
   onSubOpenChange?: (open: boolean, key: string) => void
   provider: ModelOptionProvider
   search: string
+  /** This provider serves several vendors behind one endpoint, so the row
+   *  spells its supplier out and hides the variant chip. `undefined` keeps
+   *  core's label exactly (a non-gateway provider never pays for this). */
+  gateway?: boolean
 }
 
 /** One model family row: the favorite star, the trigger that commits the
@@ -992,6 +1010,7 @@ function ModelFamilyRow({
   defaultEffort,
   family,
   favorite,
+  gateway = false,
   kbProps,
   loadingModels,
   onSelect,
@@ -1016,7 +1035,12 @@ function ModelFamilyRow({
       : null
 
   const isCurrent = activeId !== null
-  const { name, tag } = modelDisplayParts(family.id)
+  // A gateway provider (magpie) serves several vendors behind one row, so the
+  // id's leading segment names the supplier: the label carries it in full
+  // ("DeepSeek V4.1 Flash · WorkBuddy AI") and drops the variant chip, which
+  // on a router is part of the model's own name rather than a second axis.
+  const supplier = gateway ? supplierOf(family.id) : null
+  const { name, tag } = modelDisplayParts(family.id, { supplier: gateway ? supplierNamer : null })
   const decoration = useModelMenuRowDecoration({ label: name, model: family.id, provider: provider.slug })
   const caps = provider.capabilities?.[family.id]
   const limit = familyLimit(provider, family, isCurrent)
@@ -1131,8 +1155,22 @@ function ModelFamilyRow({
           </button>
         </Tip>
         <span className={cn('flex min-w-0 flex-1 items-center gap-1.5', limit.tone)}>
-          {decoration.icon !== undefined ? <ModelMenuRowIcon icon={decoration.icon} /> : null}
-          <span className="min-w-0 truncate">
+          {/* A gateway row leads with its supplier's mark: two vendors serving
+              the same model name differ only in this slot, so it must come
+              before the text is read. Core's own provider group row can't do
+              it — a gateway has exactly one group for N vendors. */}
+          {supplier ? (
+            <ModelMenuRowIcon
+              icon={supplier.codicon ? <Codicon name={supplier.codicon} size="0.8125rem" /> : supplier.mark}
+            />
+          ) : decoration.icon !== undefined ? (
+            <ModelMenuRowIcon icon={decoration.icon} />
+          ) : null}
+          {/* A gateway name carries the supplier, so it is longer than a bare
+              model name by design — letting the popup size to it beats showing
+              "DeepSeek V4.1 Flash · W…" and losing the half that tells the two
+              suppliers apart. Every other row keeps truncating as before. */}
+          <span className={gateway ? 'min-w-0' : 'min-w-0 truncate'}>
             <HighlightMatches foldSeparators query={search} text={name} />
           </span>
           {tag ? <ModelChip>{tag}</ModelChip> : null}
@@ -1346,9 +1384,13 @@ function groupModels(
       continue
     }
 
+    const gatewayProv = isGatewayCatalog(provider.models ?? [], isKnownSupplier)
+
     const matches = (family: ModelFamily) =>
       foldIncludes(
-        `${family.id} ${family.fastId ?? ''} ${provider.name} ${provider.slug} ${displayModelName(family.id)}`,
+        `${family.id} ${family.fastId ?? ''} ${provider.name} ${provider.slug} ${displayModelName(family.id, {
+          supplier: gatewayProv ? supplierNamer : null
+        })}`,
         q
       )
 
@@ -1382,7 +1424,10 @@ function groupModels(
     )
 
     if (families.length > 0) {
-      groups.push({ families, provider })
+      // Judged on the provider's FULL catalog, never the filtered `shown` set:
+      // a search that narrows to one vendor must not flip the rows back to
+      // "no supplier" mid-typing.
+      groups.push({ families, provider, gateway: gatewayProv })
     }
   }
 
