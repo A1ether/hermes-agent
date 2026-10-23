@@ -12,7 +12,11 @@
  *  The supplier also supplies the row's mark (an icon, or a monogram when no
  *  icon is known), so the two rows are told apart before the text is read. */
 
-import type { SupplierNamer } from '@/lib/model-status-label'
+import type { ReactNode } from 'react'
+import { jsx } from 'react/jsx-runtime'
+
+import { Codicon } from '@/components/ui/codicon'
+import { modelDisplayParts, type SupplierNamer } from '@/lib/model-status-label'
 
 export interface Supplier {
   /** Icon spec for the row's leading slot. A `codicon` name renders the app's
@@ -89,3 +93,38 @@ export function isKnownSupplier(segment: string): boolean {
  *  keeps core's label instead of growing a spurious "· Anthropic". */
 export const knownSupplierNamer: SupplierNamer = segment =>
   SUPPLIERS[String(segment || '').toLowerCase()]?.name ?? ''
+
+/** Everything a model row needs to paint a gateway label, or the core label
+ *  when the provider is not a gateway. One call site keeps the row component
+ *  from growing a branch ladder, and keeps this decision testable on its own. */
+export function modelRowLabel(
+  model: string,
+  gateway: boolean
+): { name: string; supplier: Supplier | null; tag: string } {
+  if (!gateway) {
+    return { ...modelDisplayParts(model), supplier: null }
+  }
+
+  const supplier = supplierOf(model)
+
+  return { ...modelDisplayParts(model, { supplier: supplierNamer }), supplier }
+}
+
+/** Rows on a gateway carry a longer name by design (it includes the supplier),
+ *  so they may size the popup instead of truncating — truncation would eat
+ *  exactly the half that tells two suppliers apart. */
+export function modelRowNameClass(gateway: boolean): string {
+  return gateway ? 'min-w-0' : 'min-w-0 truncate'
+}
+
+/** The row's leading slot. A gateway supplier wins it: two vendors serving the
+ *  same model name differ only here, so it has to read before the text does.
+ *  Falls back to whatever a decoration plugin supplied, then to nothing (so a
+ *  plain row keeps no empty box). */
+export function supplierMark(supplier: Supplier | null, decorated?: ReactNode): ReactNode {
+  if (!supplier) {
+    return decorated
+  }
+
+  return supplier.codicon ? jsx(Codicon, { name: supplier.codicon, size: '0.8125rem' }) : supplier.mark
+}

@@ -37,8 +37,8 @@ import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { isSubmitEnter } from '@/lib/ime'
 import { catalogProviderMatches, modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
-import { displayModelName, isGatewayCatalog, modelDisplayParts } from '@/lib/model-status-label'
-import { isKnownSupplier, supplierNamer, supplierOf } from '@/lib/model-suppliers'
+import { displayModelName, isGatewayCatalog } from '@/lib/model-status-label'
+import { isKnownSupplier, modelRowLabel, modelRowNameClass, supplierMark, supplierNamer } from '@/lib/model-suppliers'
 import { accountResetMs, formatReset, modelResetMs } from '@/lib/provider-limit'
 import { reasoningEffortLabel } from '@/lib/reasoning-effort'
 import { foldIncludes, normalize } from '@/lib/text'
@@ -198,6 +198,13 @@ interface ProviderGroup {
   /** The catalog is a GATEWAY catalog (`isGatewayCatalog`): several vendors
    *  behind one endpoint, so each row must name its supplier. */
   gateway: boolean
+}
+
+/** Which providers are gateways, keyed by slug. */
+function gatewaySlugs(providers: readonly ModelOptionProvider[]): Map<string, boolean> {
+  return new Map(
+    providers.map(provider => [provider.slug, isGatewayCatalog(provider.models ?? [], isKnownSupplier)])
+  )
 }
 
 function queryErrorMessage(error: unknown): null | string {
@@ -368,12 +375,9 @@ export function ModelCatalogMenu({
   // match in its provider's place.
   const favoriteSet = useMemo(() => new Set(favoriteKeys), [favoriteKeys])
 
-  // Which providers are gateways, by slug — the Favorites section mixes
-  // providers in one list, so it can't read the flag off a group.
-  const favoriteGateway = useMemo(
-    () => new Map(pickerProviders.map(provider => [provider.slug, isGatewayCatalog(provider.models ?? [], isKnownSupplier)])),
-    [pickerProviders]
-  )
+  // The Favorites section mixes providers in one list, so it can't read the
+  // gateway flag off a group.
+  const favoriteGateway = useMemo(() => gatewaySlugs(pickerProviders), [pickerProviders])
 
   // Favorites that mix providers name each provider once, as a quiet label
   // over its rows (two labs can serve the same model name). With one provider
@@ -1036,12 +1040,11 @@ function ModelFamilyRow({
 
   const isCurrent = activeId !== null
   // A gateway provider (magpie) serves several vendors behind one row, so the
-  // id's leading segment names the supplier: the label carries it in full
-  // ("DeepSeek V4.1 Flash · WorkBuddy AI") and drops the variant chip, which
-  // on a router is part of the model's own name rather than a second axis.
-  const supplier = gateway ? supplierOf(family.id) : null
-  const { name, tag } = modelDisplayParts(family.id, { supplier: gateway ? supplierNamer : null })
+  // label names the supplier in full and folds the variant suffix into the
+  // name; a non-gateway provider keeps core's label untouched.
+  const { name, supplier, tag } = modelRowLabel(family.id, gateway)
   const decoration = useModelMenuRowDecoration({ label: name, model: family.id, provider: provider.slug })
+  const mark = supplierMark(supplier, decoration.icon)
   const caps = provider.capabilities?.[family.id]
   const limit = familyLimit(provider, family, isCurrent)
 
@@ -1159,18 +1162,8 @@ function ModelFamilyRow({
               the same model name differ only in this slot, so it must come
               before the text is read. Core's own provider group row can't do
               it — a gateway has exactly one group for N vendors. */}
-          {supplier ? (
-            <ModelMenuRowIcon
-              icon={supplier.codicon ? <Codicon name={supplier.codicon} size="0.8125rem" /> : supplier.mark}
-            />
-          ) : decoration.icon !== undefined ? (
-            <ModelMenuRowIcon icon={decoration.icon} />
-          ) : null}
-          {/* A gateway name carries the supplier, so it is longer than a bare
-              model name by design — letting the popup size to it beats showing
-              "DeepSeek V4.1 Flash · W…" and losing the half that tells the two
-              suppliers apart. Every other row keeps truncating as before. */}
-          <span className={gateway ? 'min-w-0' : 'min-w-0 truncate'}>
+          {mark ? <ModelMenuRowIcon icon={mark} /> : null}
+          <span className={modelRowNameClass(gateway)}>
             <HighlightMatches foldSeparators query={search} text={name} />
           </span>
           {tag ? <ModelChip>{tag}</ModelChip> : null}
