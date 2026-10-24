@@ -309,25 +309,30 @@ export function formatModelPillLabel(
   model: string,
   options?: { fastMode?: boolean; serviceTier?: string; supplier?: SupplierNamer | null }
 ): string {
-  // The gateway label already carries the supplier and the whole model name,
-  // so the pill adds nothing on top of it (a variant tag there would only
-  // re-split the name the row just made whole). Decided by the same call that
-  // builds the label, so the two can never disagree about being a gateway.
   const parts = modelDisplayParts(model, { supplier: options?.supplier })
 
+  // The gateway branch already spent the `·` separator on the supplier, so the
+  // speed indication appends as a THIRD segment instead of replacing it. It is
+  // still owed: `fastMode` and `ultrafast` describe how the request runs, not
+  // which model it is — dropping them would leave the composer showing no sign
+  // that the turn rides a fast tier (#143357 review).
+  const speedTag = !model.trim()
+    ? ''
+    : options?.serviceTier === 'ultrafast'
+      ? 'Ultrafast'
+      : options?.fastMode
+        ? 'Fast'
+        : ''
+
+  // On a gateway the variant suffix is already part of the name
+  // ("DeepSeek V4.1 Flash"), so only the speed tag can still add anything.
   if (!parts.tag && parts.name.includes(' · ')) {
-    return parts.name
+    return speedTag ? `${parts.name} · ${speedTag}` : parts.name
   }
 
   const name = parts.name
 
-  const tag = model.trim()
-    ? options?.serviceTier === 'ultrafast'
-      ? 'Ultrafast'
-      : options?.fastMode
-        ? 'Fast'
-        : modelVariantTag(model)
-    : ''
+  const tag = speedTag || modelVariantTag(model)
 
   return tag ? `${name} · ${tag}` : name
 }

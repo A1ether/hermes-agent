@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { displayModelName, isGatewayCatalog, modelDisplayParts } from './model-status-label'
+import { displayModelName, formatModelPillLabel, isGatewayCatalog, modelDisplayParts } from './model-status-label'
 import { isKnownSupplier, knownSupplierNamer, supplierNamer, supplierOf } from './model-suppliers'
 
 const MAGPIE = [
@@ -94,5 +94,18 @@ describe('displayModelName / pill on a gateway', () => {
   it('declines an unknown prefix, so a normal provider keeps its label', () => {
     expect(knownSupplierNamer('anthropic')).toBe('')
     expect(displayModelName('anthropic/claude-opus-4-5', { supplier: knownSupplierNamer })).toBe('Opus 4.5')
+  })
+})
+
+describe('formatModelPillLabel on a gateway', () => {
+  it('keeps the fast/ultrafast speed tag the pill contract promises', () => {
+    // The supplier label must not swallow the speed indication: a manual
+    // speed=fast pick rides the same gateway model as a normal one.
+    expect(formatModelPillLabel('workbuddy/hy3', { supplier: knownSupplierNamer, fastMode: true })).toBe(
+      'Hy3 · WorkBuddy · Fast'
+    )
+    expect(
+      formatModelPillLabel('workbuddy/hy3', { supplier: knownSupplierNamer, serviceTier: 'ultrafast' })
+    ).toBe('Hy3 · WorkBuddy · Ultrafast')
   })
 })
